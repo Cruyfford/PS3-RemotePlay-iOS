@@ -1,0 +1,54 @@
+name: PS3RemotePlay
+options:
+  bundleIdPrefix: com.cruyfford
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+targets:
+  PS3RemotePlay:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+      - path: Core
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: PS3 Remote
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UIRequiresFullScreen: true
+        UIStatusBarHidden: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSLocalNetworkUsageDescription: Connects to your PlayStation 3 on the local network for Remote Play.
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cruyfford.ps3remoteplay
+        PRODUCT_NAME: PS3RemotePlay
+        SWIFT_VERSION: "5.0"
+        SWIFT_OBJC_BRIDGING_HEADER: App/Bridging-Header.h
+        TARGETED_DEVICE_FAMILY: "1,2"
+        HEADER_SEARCH_PATHS:
+          - $(SRCROOT)/Core
+          - $(SRCROOT)/build/ffmpeg-ios/include
+        LIBRARY_SEARCH_PATHS:
+          - $(SRCROOT)/build/ffmpeg-ios/lib
+        OTHER_LDFLAGS:
+          - -lavcodec
+          - -lswscale
+          - -lswresample
+          - -lavutil
+        ENABLE_BITCODE: NO
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGN_IDENTITY: ""
+        GCC_WARN_INHIBIT_ALL_WARNINGS: NO

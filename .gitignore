@@ -1,0 +1,7 @@
+build/
+*.xcodeproj
+App/Info.plist
+__pycache__/
+.DS_Store
+ps3rp.json
+xRegistry*.sys*

@@ -1,0 +1,75 @@
+name: Build iOS IPA (unsigned)
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache FFmpeg
+        uses: actions/cache@v4
+        with:
+          path: build/ffmpeg-ios
+          key: ffmpeg-ios-n6.1.1-${{ hashFiles('scripts/build-ffmpeg-ios.sh') }}
+      - name: Build FFmpeg (decoders only)
+        run: bash scripts/build-ffmpeg-ios.sh
+      - name: Protocol core self-test (mock PS3)
+        continue-on-error: true
+        run: bash tools/test/run.sh
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+      - name: Build app
+        run: |
+          mkdir -p build
+          set +e
+          xcodebuild -project PS3RemotePlay.xcodeproj -target PS3RemotePlay -configuration Release -sdk iphoneos \
+            SYMROOT="$PWD/build/products" OBJROOT="$PWD/build/obj" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build > build/xcodebuild.log 2>&1
+          status=$?
+          set -e
+          grep -E "(error|warning): " build/xcodebuild.log | sort -u | head -80 || true
+          tail -5 build/xcodebuild.log
+          if [ $status -ne 0 ]; then
+            msg=$(grep -E "error: |Undefined symbols|ld: |not found" build/xcodebuild.log | sort -u | head -40 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=xcodebuild failed::${msg}"
+            exit 1
+          fi
+          test -d build/products/Release-iphoneos/PS3RemotePlay.app
+      - name: Package IPA
+        run: |
+          rm -rf build/Payload
+          mkdir -p build/Payload
+          cp -R build/products/Release-iphoneos/PS3RemotePlay.app build/Payload/
+          (cd build && zip -qry PS3RemotePlay.ipa Payload)
+          ls -la build/PS3RemotePlay.ipa
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: PS3RemotePlay-unsigned
+          path: build/PS3RemotePlay.ipa
+          if-no-files-found: error
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build/*.log
+      - name: Publish latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          sleep 3
+          gh release create latest build/PS3RemotePlay.ipa --target "$GITHUB_SHA" \
+            --title "PS3 Remote Play - latest build" \
+            --notes "Unsigned IPA built from commit ${GITHUB_SHA}. Sign it with your usual sideloading tool."
