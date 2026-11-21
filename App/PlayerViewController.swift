@@ -76,6 +76,16 @@ final class PlayerViewController: UIViewController {
     }
 
     override var prefersStatusBarHidden: Bool { return true }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        AppDelegate.rotate(.landscape, .landscapeRight)
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        AppDelegate.rotate(.allButUpsideDown, .portrait)
+    }
     override var prefersHomeIndicatorAutoHidden: Bool { return true }
     override var preferredScreenEdgesDeferringSystemGestures: UIRectEdge { return .all }
 
