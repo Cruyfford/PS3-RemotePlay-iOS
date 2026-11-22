@@ -54,35 +54,36 @@ class MainActivity : ComponentActivity() {
 private data class Tab(val en: String, val ar: String, val icon: ImageVector)
 private val tabs = listOf(
     Tab("Home", "الرئيسية", Icons.Rounded.Home), Tab("Games", "الألعاب", Icons.Rounded.SportsEsports),
-    Tab("Controller", "اليد", Icons.Rounded.Gamepad), Tab("Files", "الملفات", Icons.Rounded.Folder),
+    Tab("Controller", "اليد", Icons.Rounded.Gamepad), Tab("Remote Play", "البث", Icons.Rounded.Cast), Tab("Files", "الملفات", Icons.Rounded.Folder),
     Tab("Settings", "الإعدادات", Icons.Rounded.Settings),
 )
 
 @Composable
 fun App(vm: HubVM) {
-    var tab by rememberSaveable { mutableIntStateOf(if (vm.configured) 0 else 4) }
+    var tab by rememberSaveable { mutableIntStateOf(if (vm.configured) 0 else 5) }
     val dir = if (vm.arabic) LayoutDirection.Rtl else LayoutDirection.Ltr
     MaterialTheme(colorScheme = darkColorScheme(primary = Th.accent, secondary = Th.accent2, background = Th.bg, surface = Th.bg2, onSurface = Th.text)) {
         CompositionLocalProvider(LocalLayoutDirection provides dir) {
-            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Th.bg, Th.bg2))).systemBarsPadding()) {
+            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Th.bg, Th.bg2))).then(if (vm.fullscreen) Modifier else Modifier.systemBarsPadding())) {
                 Column(Modifier.fillMaxSize()) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         when (tab) {
                             0 -> HomeScreen(vm) { tab = it }
                             1 -> GamesScreen(vm)
                             2 -> PadScreen(vm)
-                            3 -> FilesScreen(vm)
+                            3 -> RemotePlayScreen(vm)
+                            4 -> FilesScreen(vm)
                             else -> SettingsScreen(vm)
                         }
                     }
-                    Row(
+                    if (!vm.fullscreen) Row(
                         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).clip(RoundedCornerShape(24.dp)).background(Th.panel).padding(vertical = 6.dp),
                         horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
                         tabs.forEachIndexed { i, t ->
                             val on = i == tab
                             Column(
-                                Modifier.clip(RoundedCornerShape(16.dp)).clickable { tab = i }.padding(horizontal = 10.dp, vertical = 4.dp),
+                                Modifier.clip(RoundedCornerShape(16.dp)).clickable { tab = i }.padding(horizontal = 6.dp, vertical = 4.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Icon(t.icon, null, tint = if (on) Th.accent else Th.dim, modifier = Modifier.size(24.dp))

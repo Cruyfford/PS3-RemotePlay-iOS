@@ -10,9 +10,13 @@ android {
         applicationId = "com.cruyfford.ps3hub"
         minSdk = 24
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
+        ndk { abiFilters += "arm64-v8a" }
+        externalNativeBuild { cmake { arguments += "-DANDROID_STL=none" } }
     }
+    (project.findProperty("ndkVer") as String?)?.let { ndkVersion = it }
+    externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
     signingConfigs {
         create("hub") {
             storeFile = file("ps3hub.jks")

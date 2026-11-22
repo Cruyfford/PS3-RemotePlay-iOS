@@ -73,7 +73,7 @@ fun HomeScreen(vm: HubVM, goTab: (Int) -> Unit) {
         if (!vm.configured) {
             Glass(Modifier.padding(18.dp).fillMaxWidth()) {
                 Text(L.t("Enter your PS3's IP address to start.", "أدخل عنوان IP لجهازك للبدء."), color = Th.text)
-                Spacer(Modifier.height(10.dp)); Pill(L.t("Open settings", "افتح الإعدادات"), Icons.Rounded.Settings) { goTab(4) }
+                Spacer(Modifier.height(10.dp)); Pill(L.t("Open settings", "افتح الإعدادات"), Icons.Rounded.Settings) { goTab(5) }
             }
             return@Column
         }

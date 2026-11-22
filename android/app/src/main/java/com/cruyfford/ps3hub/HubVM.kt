@@ -35,6 +35,7 @@ class HubVM(app: Application) : AndroidViewModel(app) {
     var status by mutableStateOf(WebMan.Status())
     var loading by mutableStateOf(false)
     var toast by mutableStateOf<String?>(null)
+    var fullscreen by mutableStateOf(false)
 
     val client get() = WebMan(host.trim(), httpPort, password)
     val configured get() = host.isNotBlank()

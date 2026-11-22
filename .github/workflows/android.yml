@@ -2,7 +2,7 @@ name: Build Android APK
 on:
   push:
     branches: [main]
-    paths: ['android/**', '.github/workflows/android.yml']
+    paths: ['android/**', 'Core/**', 'scripts/build-ffmpeg-android.sh', '.github/workflows/android.yml']
   workflow_dispatch:
 permissions:
   contents: write
@@ -22,11 +22,20 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Cache FFmpeg
+        uses: actions/cache@v4
+        with:
+          path: build/ffmpeg-android
+          key: ffmpeg-android-n6.1.1-${{ hashFiles('scripts/build-ffmpeg-android.sh') }}
+      - name: Build FFmpeg (decoders only)
+        run: bash scripts/build-ffmpeg-android.sh
       - name: Build APK
         working-directory: android
         run: |
           set -o pipefail
-          gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
+          NDKV=$(basename "$ANDROID_NDK_LATEST_HOME")
+          echo "NDK $NDKV"
+          gradle assembleRelease -PndkVer=$NDKV --no-daemon --stacktrace 2>&1 | tee build.log
       - name: Errors
         if: failure()
         working-directory: android

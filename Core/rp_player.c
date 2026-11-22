@@ -99,10 +99,13 @@ static void on_session(void *ctx, const premo_info *info) {
     pthread_mutex_unlock(&p->amu);
 }
 
+#ifndef RP_PIXFMT
+#define RP_PIXFMT AV_PIX_FMT_BGRA
+#endif
 static void present(rp_player *p, AVFrame *f) {
     int w = f->width, h = f->height;
     if (w <= 0 || h <= 0 || w > 4096 || h > 4096) return;
-    p->sws = sws_getCachedContext(p->sws, w, h, (enum AVPixelFormat)f->format, w, h, AV_PIX_FMT_BGRA,
+    p->sws = sws_getCachedContext(p->sws, w, h, (enum AVPixelFormat)f->format, w, h, RP_PIXFMT,
                                   SWS_FAST_BILINEAR, NULL, NULL, NULL);
     if (!p->sws) return;
     pthread_mutex_lock(&p->vmu);
