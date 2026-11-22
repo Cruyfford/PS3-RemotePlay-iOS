@@ -2,7 +2,8 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-/// PS3 file browser over FTP: browse, download to the phone, upload (PKG → install), rename, delete.
+/// PS3 file browser: uses the File Manager phone link (port 8080, every drive incl. NTFS/exFAT) when it is
+/// running on the PS3, otherwise FTP. Browse, download to the phone, upload, install PKG, rename, delete.
 @MainActor
 final class FilesModel: ObservableObject {
     @Published var path = "/"
@@ -10,9 +11,47 @@ final class FilesModel: ObservableObject {
     @Published var busy = false
     @Published var error: String?
     @Published var transfer: (name: String, done: Int64, total: Int64)?
+    @Published var fm: FMClient?
+    @Published var volumes: [FMClient.Volume] = []
+    @Published var ps3Task: FMClient.Status?
 
     private var ftp: FTPClient?
     private var key = ""
+    private var probedHost = ""
+    private var poll: Task<Void, Never>?
+
+    /// detects the File Manager phone link once per host
+    func connect(_ store: HubStore) async {
+        let h = store.host.trimmingCharacters(in: .whitespaces)
+        guard !h.isEmpty, h != probedHost else { return }
+        probedHost = h
+        if await FMClient.probe(host: h) {
+            let c = FMClient(host: h)
+            fm = c
+            volumes = (try? await c.volumes()) ?? []
+            poll?.cancel()
+            poll = Task { [weak self] in
+                while !Task.isCancelled {
+                    if let st = try? await c.status() { await MainActor.run { self?.ps3Task = st.busy ? st : nil } }
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                }
+            }
+        } else { fm = nil; volumes = []; poll?.cancel(); ps3Task = nil }
+    }
+
+    func list(_ store: HubStore, _ p: String) async throws -> [FTPClient.Entry] {
+        if let fm = fm { return try await fm.list(p) }
+        return try await client(store).list(p)
+    }
+    func mkdir(_ store: HubStore, _ p: String) async throws { if let fm = fm { try await fm.mkdir(p) } else { try await client(store).mkdir(p) } }
+    func rename(_ store: HubStore, _ a: String, _ b: String) async throws { if let fm = fm { try await fm.rename(a, b) } else { try await client(store).rename(a, b) } }
+    func delete(_ store: HubStore, _ p: String, isDir: Bool) async throws { if let fm = fm { try await fm.delete(p) } else { try await client(store).delete(p, isDir: isDir) } }
+    func download(_ store: HubStore, _ r: String, to l: URL, progress: @escaping (Int64) -> Void) async throws {
+        if let fm = fm { try await fm.download(r, to: l, progress: progress) } else { try await client(store).download(r, to: l, progress: progress) }
+    }
+    func upload(_ store: HubStore, _ l: URL, to r: String, progress: @escaping (Int64) -> Void) async throws {
+        if let fm = fm { try await fm.upload(l, to: r, progress: progress) } else { try await client(store).upload(l, to: r, progress: progress) }
+    }
 
     func client(_ store: HubStore) -> FTPClient {
         let k = "\(store.host):\(store.ftpPort)"
@@ -26,23 +65,28 @@ final class FilesModel: ObservableObject {
         let target = p ?? path
         busy = true; error = nil
         defer { busy = false }
+        await connect(store)
         do {
-            entries = try await client(store).list(target)
+            entries = try await list(store, target)
             path = target
         } catch {
             reset()
             // one retry with a fresh connection
-            do { entries = try await client(store).list(target); path = target }
+            do { entries = try await list(store, target); path = target }
             catch { self.error = error.localizedDescription }
         }
     }
 
-    func join(_ name: String) -> String { path == "/" ? "/" + name : path + "/" + name }
+    func join(_ name: String) -> String { path.hasSuffix("/") ? path + name : path + "/" + name }
 
     var parent: String? {
         guard path != "/" else { return nil }
+        if fm != nil && volumes.contains(where: { $0.root == path || $0.root == path + "/" }) { return nil }
         var p = path
-        if let r = p.range(of: "/", options: .backwards) { p = String(p[..<r.lowerBound]) }
+        if p.hasSuffix("/") { p.removeLast() }
+        guard let r = p.range(of: "/", options: .backwards) else { return nil }
+        p = String(p[..<r.lowerBound])
+        if p.hasSuffix(":") { p += "/" }
         return p.isEmpty ? "/" : p
     }
 }
@@ -80,9 +124,27 @@ struct FilesView: View {
             }
             .padding(.horizontal, 18).padding(.top, 10)
 
+            if model.fm != nil {
+                HStack(spacing: 6) {
+                    Image(systemName: "link.circle.fill").foregroundColor(Theme.accent2)
+                    Text(L.t("Connected to File Manager — all drives (NTFS / exFAT too)", "متصل بـ File Manager — كل الأقراص (NTFS و exFAT أيضاً)"))
+                        .font(.system(size: 11.5, weight: .semibold, design: .rounded)).foregroundColor(Theme.dim).lineLimit(1)
+                    Spacer()
+                }
+                .padding(.horizontal, 18)
+            }
+            if let t = model.ps3Task {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text((t.task == "install" ? L.t("PS3 installing: ", "الجهاز يثبّت: ") : L.t("PS3 copying: ", "الجهاز ينسخ: ")) + (t.name ?? ""))
+                        .font(.system(size: 12.5, weight: .semibold, design: .rounded)).foregroundColor(Theme.text).lineLimit(1)
+                    ProgressView(value: (t.total ?? 0) > 0 ? Double(t.done ?? 0) / Double(t.total ?? 1) : 0).tint(Theme.accent)
+                    if let q = t.queue, q > 0 { Text(L.t("\(q) waiting", "\(q) بالانتظار")).font(.system(size: 11)).foregroundColor(Theme.dim) }
+                }
+                .padding(12).glass(14).padding(.horizontal, 18)
+            }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    ForEach(shortcuts, id: \.1) { s in
+                    ForEach(model.fm != nil ? model.volumes.map { ($0.label, $0.root) } + [("packages", "/dev_hdd0/packages")] : shortcuts, id: \.1) { s in
                         Button { Task { await model.load(store, s.1) } } label: {
                             Text(s.0).font(.system(size: 12.5, weight: .bold, design: .rounded)).foregroundColor(model.path.hasPrefix(s.1) ? .white : Theme.text)
                                 .padding(.horizontal, 12).padding(.vertical, 7)
@@ -121,7 +183,7 @@ struct FilesView: View {
                 VStack(spacing: 10) {
                     Image(systemName: "wifi.exclamationmark").font(.system(size: 34)).foregroundColor(Theme.warm)
                     Text(e).foregroundColor(Theme.text).multilineTextAlignment(.center)
-                    Text(L.t("Use port 21 for webMAN's FTP or 2121 for File Manager's FTP (Settings).", "استخدم المنفذ 21 لـ FTP في webMAN أو 2121 لـ FTP في File Manager (الإعدادات)."))
+                    Text(L.t("Open File Manager on the PS3 and turn on FTP in its settings (also enables the phone link), or use webMAN's FTP on port 21.", "افتح File Manager على الجهاز وشغّل FTP من إعداداته (يشغّل الربط مع الجوال أيضاً)، أو استخدم FTP الخاص بـ webMAN على المنفذ 21."))
                         .font(.system(size: 12)).foregroundColor(Theme.dim).multilineTextAlignment(.center)
                     PillButton(title: L.t("Retry", "إعادة المحاولة"), icon: "arrow.clockwise") { Task { await model.load(store) } }
                 }
@@ -148,7 +210,7 @@ struct FilesView: View {
         }
         .alert(L.t("New folder", "مجلد جديد"), isPresented: $newFolder) {
             TextField(L.t("Name", "الاسم"), text: $folderName)
-            Button(L.t("Create", "إنشاء")) { let n = folderName; Task { try? await model.client(store).mkdir(model.join(n)); await model.load(store) } }
+            Button(L.t("Create", "إنشاء")) { let n = folderName; Task { try? await model.mkdir(store, model.join(n)); await model.load(store) } }
             Button(L.t("Cancel", "إلغاء"), role: .cancel) {}
         }
         .alert(L.t("Rename", "إعادة تسمية"), isPresented: Binding(get: { renameItem != nil }, set: { if !$0 { renameItem = nil } })) {
@@ -156,7 +218,7 @@ struct FilesView: View {
             Button(L.t("Rename", "تسمية")) {
                 if let it = renameItem {
                     let from = model.join(it.name), to = model.join(newName)
-                    Task { try? await model.client(store).rename(from, to); await model.load(store) }
+                    Task { try? await model.rename(store, from, to); await model.load(store) }
                 }
                 renameItem = nil
             }
@@ -186,7 +248,11 @@ struct FilesView: View {
                 }
                 Spacer()
                 if e.name.lowercased().hasSuffix(".pkg") {
-                    Button { store.run(L.t("Installing on the PS3", "جارٍ التثبيت على الجهاز")) { try await store.client.installPath(model.join(e.name)) } } label: {
+                    Button {
+                        let p = model.join(e.name)
+                        if let fm = model.fm { store.run(L.t("Installing on the PS3", "جارٍ التثبيت على الجهاز")) { try await fm.install(p) } }
+                        else { store.run(L.t("Installing on the PS3", "جارٍ التثبيت على الجهاز")) { try await store.client.installPath(p) } }
+                    } label: {
                         Text(L.t("Install", "تثبيت")).font(.system(size: 12, weight: .bold, design: .rounded)).foregroundColor(.white)
                             .padding(.horizontal, 10).padding(.vertical, 6).background(Theme.accent2.opacity(0.85), in: Capsule())
                     }
@@ -214,7 +280,7 @@ struct FilesView: View {
         model.transfer = (e.name, 0, e.size)
         Task {
             do {
-                try await model.client(store).download(remote, to: local) { n in Task { @MainActor in model.transfer = (e.name, n, e.size) } }
+                try await model.download(store, remote, to: local) { n in Task { @MainActor in model.transfer = (e.name, n, e.size) } }
                 model.transfer = nil
                 store.show(L.t("Saved to the app's Files folder", "حُفظ في مجلد التطبيق في Files"))
                 shareURL = local
@@ -234,12 +300,13 @@ struct FilesView: View {
                 let fsz: Int? = (try? u.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
                 let size = Int64(fsz ?? 0)
                 let isPkg = u.pathExtension.lowercased() == "pkg"
-                let dir = isPkg && !model.path.hasPrefix("/dev_hdd0/packages") ? "/dev_hdd0/packages" : model.path
-                let remote = (dir == "/" ? "" : dir) + "/" + u.lastPathComponent
+                let dir = model.fm == nil && isPkg && !model.path.hasPrefix("/dev_hdd0/packages") ? "/dev_hdd0/packages" : model.path
+                let remote = dir.hasSuffix("/") ? dir + u.lastPathComponent : dir + "/" + u.lastPathComponent
                 model.transfer = (u.lastPathComponent, 0, size)
                 do {
-                    try await model.client(store).upload(u, to: remote) { n in Task { @MainActor in model.transfer = (u.lastPathComponent, n, size) } }
-                    store.show(isPkg ? L.t("PKG sent to /dev_hdd0/packages", "أُرسل الـ PKG إلى /dev_hdd0/packages") : L.t("Uploaded", "تم الرفع"))
+                    try await model.upload(store, u, to: remote) { n in Task { @MainActor in model.transfer = (u.lastPathComponent, n, size) } }
+                    if isPkg, let fm = model.fm { try? await fm.install(remote); store.show(L.t("PKG sent — installing on the PS3", "أُرسل الـ PKG — جارٍ التثبيت على الجهاز")) }
+                    else { store.show(isPkg ? L.t("PKG sent to /dev_hdd0/packages", "أُرسل الـ PKG إلى /dev_hdd0/packages") : L.t("Uploaded", "تم الرفع")) }
                 } catch {
                     model.reset()
                     store.show(L.t("Upload failed", "فشل الرفع"))
@@ -253,7 +320,7 @@ struct FilesView: View {
     private func delete(_ e: FTPClient.Entry) {
         let p = model.join(e.name)
         Task {
-            do { try await model.client(store).delete(p, isDir: e.isDir); await model.load(store) }
+            do { try await model.delete(store, p, isDir: e.isDir); await model.load(store) }
             catch { store.show(L.t("Couldn't delete", "تعذر الحذف")) }
         }
     }
