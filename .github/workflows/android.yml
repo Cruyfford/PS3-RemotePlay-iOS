@@ -24,11 +24,14 @@ jobs:
           gradle-version: '8.9'
       - name: Build APK
         working-directory: android
-        run: gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log; test ${PIPESTATUS[0]} -eq 0
+        run: |
+          set -o pipefail
+          gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
       - name: Errors
         if: failure()
         working-directory: android
-        run: grep -E "^e: |error:|FAILURE|What went wrong" -A3 build.log | head -80
+        run: |
+          grep -E "^e: |error:|FAILURE|What went wrong" -A3 build.log | head -80
       - name: Collect APK
         run: cp android/app/build/outputs/apk/release/app-release.apk PS3Hub.apk && ls -la PS3Hub.apk
       - uses: actions/upload-artifact@v4
