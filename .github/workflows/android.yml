@@ -1,0 +1,44 @@
+name: Build Android APK
+on:
+  push:
+    branches: [main]
+    paths: ['android/**', '.github/workflows/android.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build APK
+        working-directory: android
+        run: gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log; test ${PIPESTATUS[0]} -eq 0
+      - name: Errors
+        if: failure()
+        working-directory: android
+        run: grep -E "^e: |error:|FAILURE|What went wrong" -A3 build.log | head -80
+      - name: Collect APK
+        run: cp android/app/build/outputs/apk/release/app-release.apk PS3Hub.apk && ls -la PS3Hub.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PS3Hub-apk
+          path: PS3Hub.apk
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete android-latest --yes --cleanup-tag || true
+          sleep 3
+          gh release create android-latest PS3Hub.apk --target "$GITHUB_SHA" --title "PS3 Hub Android - latest" --notes "APK built from ${GITHUB_SHA}"
